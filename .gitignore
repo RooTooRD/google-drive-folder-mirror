@@ -1,0 +1,15 @@
+credential.json
+token.json
+telegram.json
+telegram.session
+telegram.session-journal
+tree.json
+state.json
+settings.json
+manifest.json
+downloads/
+.venv/
+__pycache__/
+*.pyc
+.screenshots/
+!docs/screenshots/
