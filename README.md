@@ -190,8 +190,13 @@ Drive ──download──▶ buffer/ ──upload──▶ Telegram ──▶ l
 - Files are uploaded in folder order, so a flat channel reads in the same order
   as the source tree.
 - Each caption carries the file name, its folder path and its size.
-- Pressing `i` uploads and pins an `INDEX.md` listing every file with a link.
-  `manifest.json` holds the same mapping locally.
+- Pressing `i` publishes a navigable index: a pinned root post links to each
+  top-level section, larger sections link to their subfolders, and leaves list
+  the files — all as ordinary in-channel posts with back-links, so the channel
+  is browsable inside Telegram rather than by opening a file. It adapts to size
+  (one post when it all fits, nested posts when it does not), and re-publishing
+  replaces the previous index instead of duplicating it. `manifest.json` holds
+  the same path→link mapping locally.
 - A local file is deleted only after Telegram returns a message id and the size
   it reports matches the file sent.
 - Upload records are written to disk before the local copy is removed, so an
@@ -254,7 +259,7 @@ All are excluded from version control.
 ### Tests
 
 ```bash
-for t in smoke download pipeline; do uv run python tests/test_$t.py || break; done
+for t in smoke download pipeline index; do uv run python tests/test_$t.py || break; done
 ```
 
 The suite runs offline and requires no Google or Telegram account. The Drive
@@ -266,6 +271,7 @@ recording double.
 | `test_smoke.py` | Screens driven headlessly end to end, banner geometry, selection logic; writes SVG screenshots |
 | `test_download.py` | Fresh download, skip on rerun, range resume, checksum rejection, cancel and resume |
 | `test_pipeline.py` | Upload ordering, deletion only after confirmation, buffer limits, queue starvation, stranded bytes, adoption, persistence |
+| `test_index.py` | Index tree build, every file linked once, post size limits, pagination, nesting and back-links, publisher ordering and stale cleanup |
 
 ### Project layout
 

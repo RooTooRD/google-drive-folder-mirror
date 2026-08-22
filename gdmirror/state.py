@@ -20,6 +20,7 @@ class State:
         self._lock = threading.Lock()
         self._done: dict[str, dict] = {}
         self._uploaded: dict[str, dict] = {}
+        self._index_messages: list[int] = []
         self.load()
 
     # -- persistence ------------------------------------------------------
@@ -33,10 +34,15 @@ class State:
             return
         self._done = data.get("done", {})
         self._uploaded = data.get("uploaded", {})
+        self._index_messages = list(data.get("index_messages", []))
 
     def save(self) -> None:
         with self._lock:
-            payload = {"done": dict(self._done), "uploaded": dict(self._uploaded)}
+            payload = {
+                "done": dict(self._done),
+                "uploaded": dict(self._uploaded),
+                "index_messages": list(self._index_messages),
+            }
         tmp = STATE_FILE.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(payload, indent=1))
         tmp.replace(STATE_FILE)
@@ -62,6 +68,16 @@ class State:
 
     def __len__(self) -> int:
         return len(self._done)
+
+    # -- index posts ------------------------------------------------------
+
+    def index_messages(self) -> list[int]:
+        with self._lock:
+            return list(self._index_messages)
+
+    def set_index_messages(self, ids: list[int]) -> None:
+        with self._lock:
+            self._index_messages = list(ids)
 
     # -- telegram ---------------------------------------------------------
 

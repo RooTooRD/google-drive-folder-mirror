@@ -448,41 +448,28 @@ class Pipeline:
 
     # -- index ------------------------------------------------------------
 
-    def build_index(self) -> str:
-        """Markdown index of everything uploaded so far, grouped by folder."""
-        records = sorted(self.state.uploads(), key=lambda r: r["path"])
-        lines = [
-            f"# {self.index_title}",
-            "",
-            f"{len(records)} files · {human(sum(r.get('size', 0) for r in records))}",
-            "",
-        ]
-        current = None
-        for rec in records:
-            folder = str(Path(rec["path"]).parent)
-            folder = "/" if folder == "." else folder
-            if folder != current:
-                current = folder
-                lines += ["", f"## {folder}", ""]
-            name = Path(rec["path"]).name
-            lines.append(
-                f"- [{name}]({rec['link']}) — {human(rec.get('size', 0))}"
-            )
-        return "\n".join(lines) + "\n"
+    def build_index_tree(self):
+        """A tree of navigable Telegram posts covering everything uploaded so far."""
+        from .index import build_index
+
+        records = self.state.uploads()
+        return build_index(self.index_title, records)
 
     def publish_index(self) -> str:
-        """Upload the index as a pinned document. Returns the message link."""
-        index_path = self.dest / "INDEX.md"
-        index_path.parent.mkdir(parents=True, exist_ok=True)
-        index_path.write_text(self.build_index())
-        result = self.tg.upload(
-            path=index_path,
-            chat_id=self.chat_id,
-            caption="INDEX — every file in this channel, with links",
-        )
-        self.tg.pin(self.chat_id, result["msg_id"])
-        index_path.unlink(missing_ok=True)
-        return result["link"]
+        """Publish the index as pinned, cross-linked in-channel posts.
+
+        Replaces the previous index (whose message ids are remembered in state)
+        so re-running does not leave stale posts behind. Returns the link to the
+        pinned root post.
+        """
+        from .index import IndexPublisher
+
+        tree = self.build_index_tree()
+        publisher = IndexPublisher(self.tg, self.chat_id, on_log=self._log)
+        result = publisher.publish(tree, stale_message_ids=self.state.index_messages())
+        self.state.set_index_messages(result["message_ids"])
+        self.state.save()
+        return result["root_link"]
 
 
 def _load_manifest() -> dict[str, dict]:

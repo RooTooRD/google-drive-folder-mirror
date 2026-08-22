@@ -277,6 +277,59 @@ class TG:
         except Exception:
             pass  # pinning is a nicety, never fail a run over it
 
+    # -- text messages (index posts) --------------------------------------
+
+    def _retry(self, make_coro, retries: int = 4):
+        """Run an API coroutine, waiting out FLOOD_WAIT and backing off on the rest."""
+        from telethon.errors import FloodWaitError
+
+        attempt = 0
+        while True:
+            try:
+                return self._call(make_coro())
+            except FloodWaitError as exc:
+                time.sleep(int(getattr(exc, "seconds", 60)) + 2)
+            except Exception as exc:
+                attempt += 1
+                if attempt > retries:
+                    raise TelegramError(_clean(exc)) from exc
+                time.sleep(min(30, 2**attempt))
+
+    def send_html(self, chat_id: int, text: str) -> int:
+        """Send an HTML-formatted message. Returns its id. Link previews off, so
+        the many in-channel links do not each render a preview card."""
+        async def go():
+            return await self._client.send_message(
+                chat_id, text, parse_mode="html", link_preview=False
+            )
+
+        return self._retry(go).id
+
+    def edit_html(self, chat_id: int, msg_id: int, text: str) -> None:
+        async def go():
+            return await self._client.edit_message(
+                chat_id, msg_id, text, parse_mode="html", link_preview=False
+            )
+
+        try:
+            self._retry(go)
+        except TelegramError as exc:
+            # "message not modified" is not worth failing a run over
+            if "not modified" not in str(exc).lower():
+                raise
+
+    def delete_messages(self, chat_id: int, msg_ids: list[int]) -> None:
+        if not msg_ids:
+            return
+
+        async def go():
+            return await self._client.delete_messages(chat_id, msg_ids)
+
+        try:
+            self._retry(go)
+        except TelegramError:
+            pass  # deleting a stale index is best-effort
+
 
 def _media_size(message) -> int | None:
     document = getattr(message, "document", None)

@@ -211,7 +211,7 @@ class PipelineScreen(Screen):
             log.write(f"  {path} - {why}")
         if prog.failures:
             log.write("rerun the pipeline to retry the failures")
-        log.write("press i to upload and pin the index document")
+        log.write("press i to publish and pin the navigable index")
         self.notify(
             f"{prog.uploaded_files} uploaded · {prog.failed} failed",
             severity="error" if prog.failed else "information",
@@ -232,6 +232,8 @@ class PipelineScreen(Screen):
             return
         log = self.query_one("#log", RichLog)
 
+        self.notify("publishing index…")
+
         def work() -> None:
             call = self.app.call_from_thread
             try:
@@ -239,7 +241,7 @@ class PipelineScreen(Screen):
             except Exception as exc:
                 call(log.write, f"index failed: {type(exc).__name__}: {exc}")
                 return
-            call(log.write, f"index pinned: {link}")
+            call(log.write, f"index published and pinned: {link}")
 
         self.run_worker(work, thread=True, exclusive=True)
 

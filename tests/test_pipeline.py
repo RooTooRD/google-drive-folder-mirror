@@ -35,6 +35,7 @@ class FakeTG:
         self.fail_paths: set[str] = set()
         self.lie_about_size: set[str] = set()
         self.pinned: list[int] = []
+        self.messages: dict[int, str] = {}
         self._next_id = 100
         self._lock = threading.Lock()
 
@@ -68,6 +69,21 @@ class FakeTG:
 
     def pin(self, chat_id, msg_id) -> None:
         self.pinned.append(msg_id)
+
+    # text-message API used by the index publisher
+    def send_html(self, chat_id, text) -> int:
+        with self._lock:
+            self._next_id += 1
+            mid = self._next_id
+            self.messages[mid] = text
+            return mid
+
+    def edit_html(self, chat_id, msg_id, text) -> None:
+        self.messages[msg_id] = text
+
+    def delete_messages(self, chat_id, ids) -> None:
+        for mid in ids:
+            self.messages.pop(mid, None)
 
     def close(self) -> None:
         pass
@@ -196,16 +212,25 @@ def main() -> int:
         assert "size mismatch" in prog4.failures[0][1]
         print("size-mismatch guard ok")
 
-        # 7. index document lists what actually landed
+        # 7. the navigable index covers every uploaded file and is pinned
         state_mod.STATE_FILE = tmp / "state.json"
         tg5 = FakeTG()
-        pipe5, _ = build_pipeline(tmp, files, tg5, budget=900_000)
-        index = pipe5.build_index()
-        assert index.count("https://t.me/c/") == 5, index
-        assert "## Unit 1" in index and "## Unit 3" in index
+        pipe5, state5 = build_pipeline(tmp, files, tg5, budget=900_000)
+        tree = pipe5.build_index_tree()
+        file_links = [e.target for p in tree.posts for e in p.entries
+                      if e.is_url and e.target]
+        assert len(file_links) == len(files) == len(set(file_links)), file_links
         link = pipe5.publish_index()
         assert link.startswith("https://t.me/c/") and tg5.pinned
-        assert not (buffer_dir / "INDEX.md").exists(), "index file left behind"
+        # the pinned post is the root, and its id was recorded for later cleanup
+        assert tg5.pinned[-1] in state5.index_messages()
+        assert not (buffer_dir / "INDEX.md").exists(), "no index file should be written"
+        # re-publishing replaces the previous posts rather than duplicating them
+        before = set(state5.index_messages())
+        pipe5.publish_index()
+        after = set(state5.index_messages())
+        assert before.isdisjoint(after), "re-publish reused old message ids"
+        assert all(m not in tg5.messages for m in before), "old index not deleted"
         print("index ok")
 
         # 8. regression: a big file at the head of the queue must not be starved
