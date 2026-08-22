@@ -450,8 +450,16 @@ class IndexPublisher:
                 time.sleep(self.throttle)
         self._log(f"linked {len(tree.posts) - 1} index messages")
 
+        # pin the root (the parent of the whole index). Clear any previous pin
+        # first, so exactly one parent stays pinned across re-publishes.
         root_id = ids[tree.root_key]
-        self.tg.pin(self.chat_id, root_id)
+        if hasattr(self.tg, "unpin_all"):
+            self.tg.unpin_all(self.chat_id)
+        try:
+            self.tg.pin(self.chat_id, root_id)
+            self._log("pinned the index root post")
+        except Exception as exc:  # posts already exist; surface, don't discard them
+            self._log(f"could not pin the index root: {exc}")
 
         # remove the previous index now that the new one is live
         if stale_message_ids:

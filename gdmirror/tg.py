@@ -272,10 +272,23 @@ class TG:
         }
 
     def pin(self, chat_id: int, msg_id: int) -> None:
+        """Pin a message. Raises TelegramError on failure; the index root is the
+        channel's entry point, so a caller needs to know if it did not pin."""
+        async def go():
+            return await self._client.pin_message(chat_id, msg_id, notify=False)
+
+        self._retry(go)
+
+    def unpin_all(self, chat_id: int) -> None:
+        """Remove every existing pin. Best-effort: used to clear a previous index
+        (or the old .md pin) so exactly one parent post stays pinned."""
+        async def go():
+            return await self._client.unpin_message(chat_id)
+
         try:
-            self._call(self._client.pin_message(chat_id, msg_id), timeout=60)
-        except Exception:
-            pass  # pinning is a nicety, never fail a run over it
+            self._retry(go)
+        except TelegramError:
+            pass
 
     # -- text messages (index posts) --------------------------------------
 
