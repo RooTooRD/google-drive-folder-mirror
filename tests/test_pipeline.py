@@ -220,8 +220,14 @@ def main() -> int:
         file_links = [e.target for p in tree.posts for e in p.entries
                       if e.is_url and e.target]
         assert len(file_links) == len(files) == len(set(file_links)), file_links
-        link = pipe5.publish_index()
-        assert link.startswith("https://t.me/c/") and tg5.pinned
+        stages: list[tuple[str, int, int]] = []
+        result = pipe5.publish_index(on_progress=lambda *a: stages.append(a))
+        assert result["root_link"].startswith("https://t.me/c/") and tg5.pinned
+        assert result["posts"] == len(tree.posts)
+        # progress fired through the stages and ended on "done"
+        # (this dataset fits one post, so there is no "link" stage)
+        assert {s[0] for s in stages} >= {"send", "pin"}
+        assert stages[0][0] == "send" and stages[-1][0] == "done"
         # the pinned post is the root, and its id was recorded for later cleanup
         assert tg5.pinned[-1] in state5.index_messages()
         assert not (buffer_dir / "INDEX.md").exists(), "no index file should be written"

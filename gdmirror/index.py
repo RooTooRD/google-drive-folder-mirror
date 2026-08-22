@@ -423,22 +423,40 @@ class IndexPublisher:
         if self.on_log:
             self.on_log(msg)
 
-    def publish(self, tree: IndexTree, stale_message_ids: list[int] | None = None) -> dict:
+    def publish(
+        self,
+        tree: IndexTree,
+        stale_message_ids: list[int] | None = None,
+        on_progress=None,
+    ) -> dict:
+        """Send, link, pin and clean up.
+
+        `on_progress(stage, done, total)` fires per step so a UI can show live
+        progress. Stages: "send", "link", "pin", "clean", "done".
+        """
         import time
 
+        def progress(stage: str, done: int, total: int) -> None:
+            if on_progress:
+                on_progress(stage, done, total)
+
         ids: dict[str, int] = {}
+        total = len(tree.posts)
+        editable = sum(1 for p in tree.posts if not p.is_root)
 
         # pass 1: send bodies, children first
-        for post in tree.posts:
+        for i, post in enumerate(tree.posts, 1):
             text = render(post, ids, self.chat_id, tree.root_title)
             post.msg_id = self.tg.send_html(self.chat_id, text)
             ids[post.key] = post.msg_id
+            progress("send", i, total)
             if self.throttle:
                 time.sleep(self.throttle)
-        self._log(f"posted {len(tree.posts)} index messages")
+        self._log(f"posted {total} index messages")
 
         # pass 2: re-render now that every id is known, so upward links go live.
         # Only the root has no back-link, so only it can be skipped.
+        done = 0
         for post in tree.posts:
             if post.is_root:
                 continue
@@ -446,12 +464,15 @@ class IndexPublisher:
                 self.chat_id, post.msg_id,
                 render(post, ids, self.chat_id, tree.root_title),
             )
+            done += 1
+            progress("link", done, editable)
             if self.throttle:
                 time.sleep(self.throttle)
-        self._log(f"linked {len(tree.posts) - 1} index messages")
+        self._log(f"linked {editable} index messages")
 
         # pin the root (the parent of the whole index). Clear any previous pin
         # first, so exactly one parent stays pinned across re-publishes.
+        progress("pin", 0, 1)
         root_id = ids[tree.root_key]
         if hasattr(self.tg, "unpin_all"):
             self.tg.unpin_all(self.chat_id)
@@ -460,16 +481,20 @@ class IndexPublisher:
             self._log("pinned the index root post")
         except Exception as exc:  # posts already exist; surface, don't discard them
             self._log(f"could not pin the index root: {exc}")
+        progress("pin", 1, 1)
 
         # remove the previous index now that the new one is live
         if stale_message_ids:
             still_here = [m for m in stale_message_ids if m not in ids.values()]
             if still_here:
+                progress("clean", 0, len(still_here))
                 self.tg.delete_messages(self.chat_id, still_here)
                 self._log(f"removed {len(still_here)} old index messages")
 
+        progress("done", total, total)
         return {
             "root_id": root_id,
             "root_link": _channel_link(self.chat_id, root_id),
             "message_ids": [p.msg_id for p in tree.posts],
+            "posts": total,
         }

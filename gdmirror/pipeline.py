@@ -455,21 +455,26 @@ class Pipeline:
         records = self.state.uploads()
         return build_index(self.index_title, records)
 
-    def publish_index(self) -> str:
+    def publish_index(self, on_progress=None) -> dict:
         """Publish the index as pinned, cross-linked in-channel posts.
 
         Replaces the previous index (whose message ids are remembered in state)
-        so re-running does not leave stale posts behind. Returns the link to the
-        pinned root post.
+        so re-running does not leave stale posts behind. `on_progress(stage,
+        done, total)` fires per step. Returns the publish result dict, including
+        the root link and the number of posts.
         """
         from .index import IndexPublisher
 
         tree = self.build_index_tree()
         publisher = IndexPublisher(self.tg, self.chat_id, on_log=self._log)
-        result = publisher.publish(tree, stale_message_ids=self.state.index_messages())
+        result = publisher.publish(
+            tree,
+            stale_message_ids=self.state.index_messages(),
+            on_progress=on_progress,
+        )
         self.state.set_index_messages(result["message_ids"])
         self.state.save()
-        return result["root_link"]
+        return result
 
 
 def _load_manifest() -> dict[str, dict]:

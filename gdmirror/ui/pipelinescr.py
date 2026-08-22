@@ -35,6 +35,7 @@ class PipelineScreen(Screen):
         self._rate = 0.0
         self._dl_rate = 0.0
         self._history: deque[float] = deque(maxlen=44)
+        self.index_line: Text | None = None   # live index-publish status
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -148,6 +149,9 @@ class PipelineScreen(Screen):
             )
         if not self.running:
             head.append("   [finished]", style="bold #00f5d4")
+        if self.index_line is not None:
+            head.append("\n")
+            head.append_text(self.index_line)
         self.query_one("#status-line", Static).update(head)
         self.query_one("#active", Static).update(self._lanes(upload, downloads, prog))
 
@@ -224,24 +228,57 @@ class PipelineScreen(Screen):
             self.pipe.cancel()
             self.notify("cancelling after the current file")
 
+    _STAGE = {
+        "send": "sending posts",
+        "link": "linking back-references",
+        "pin": "pinning the parent post",
+        "clean": "clearing the old index",
+    }
+
     def action_index(self) -> None:
         if self.running:
             self.notify("wait for the run to finish", severity="warning")
             return
         if self.pipe is None:
             return
+        if getattr(self, "_indexing", False):
+            self.notify("already publishing the index", severity="warning")
+            return
+        self._indexing = True
         log = self.query_one("#log", RichLog)
-
         self.notify("publishing index…")
+
+        def set_line(text: Text) -> None:
+            self.index_line = text
+
+        def on_progress(stage: str, done: int, total: int) -> None:
+            label = self._STAGE.get(stage, stage)
+            line = Text("  ⏳ index · ", style="#ffd166")
+            line.append(label, style="bold #ffd166")
+            if total > 1:
+                line.append(f"  {done}/{total}", style="#ffd166")
+            self.app.call_from_thread(set_line, line)
 
         def work() -> None:
             call = self.app.call_from_thread
             try:
-                link = self.pipe.publish_index()
+                result = self.pipe.publish_index(on_progress=on_progress)
             except Exception as exc:
+                fail = Text("  ✖ index failed: ", style="bold #ff5f7e")
+                fail.append(f"{type(exc).__name__}: {exc}", style="#ff5f7e")
+                call(set_line, fail)
                 call(log.write, f"index failed: {type(exc).__name__}: {exc}")
+                call(self.notify, "index failed", severity="error")
                 return
-            call(log.write, f"index published and pinned: {link}")
+            finally:
+                self._indexing = False
+
+            posts, link = result["posts"], result["root_link"]
+            done = Text("  ✅ index published · ", style="bold #9bff3c")
+            done.append(f"{posts} posts · pinned", style="#9bff3c")
+            call(set_line, done)
+            call(log.write, f"index published and pinned ({posts} posts): {link}")
+            call(self.notify, f"index published · {posts} posts pinned")
 
         self.run_worker(work, thread=True, exclusive=True)
 
